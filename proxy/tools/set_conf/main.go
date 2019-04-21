@@ -16,12 +16,12 @@ var (
 
 func main() {
 
-	etcdConf := util.EtcdConf{
+	etcdConf := common.EtcdConf{
 		Endpoints: []string{"127.0.0.1:2379"},
 		Timeout:   5,
 	}
 
-	etcdClient, err := util.InitEtcd(etcdConf)
+	etcdClient, err := common.InitEtcd(etcdConf)
 	if err != nil {
 		panic(err)
 	}

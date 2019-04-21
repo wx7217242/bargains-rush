@@ -26,7 +26,7 @@ var (
 func initConf() error {
 
 	// 初始化redis配置
-	var redisConf util.RedisConf
+	var redisConf common.RedisConf
 	redisConf.Addr = beego.AppConfig.String("redis_addr")
 	if len(redisConf.Addr) == 0 {
 		return fmt.Errorf("redis addr can't be empty");
@@ -64,7 +64,7 @@ func initConf() error {
 	}
 	appConfig.ProductKey = fmt.Sprintf("%s%s", key_prefix, product_key)
 
-	var etcdConf util.EtcdConf
+	var etcdConf common.EtcdConf
 	etcdConf.Endpoints = []string{beego.AppConfig.String("etcd_addr")}
 	if len(etcdConf.Endpoints) == 0 {
 		return fmt.Errorf("etcd addr can't be empty");
@@ -87,19 +87,19 @@ func initConf() error {
 
 func initApp() (error) {
 
-	err := util.InitLogger(appConfig.LogPath, appConfig.LogLevel)
+	err := common.InitBeegoLogger(appConfig.LogPath, appConfig.LogLevel)
 	if err != nil {
 		return err
 	}
 
-	pool, err := util.InitRedis(appConfig.RedisConf)
+	pool, err := common.InitRedis(appConfig.RedisConf)
 	if err != nil {
 		return err
 	}
 	redisPool = pool
 	logs.Debug("init redisPool succeed!")
 
-	client, err := util.InitEtcd(appConfig.EtcdConf)
+	client, err := common.InitEtcd(appConfig.EtcdConf)
 	if err != nil {
 		return err
 	}
@@ -122,7 +122,7 @@ func initApp() (error) {
 
 func watchBargainsRushProductKey() {
 
-	client, err := util.InitEtcd(appConfig.EtcdConf)
+	client, err := common.InitEtcd(appConfig.EtcdConf)
 	if err != nil {
 		logs.Error("init etcd failed, err:%v", err)
 		return

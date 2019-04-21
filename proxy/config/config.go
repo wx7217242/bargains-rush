@@ -10,8 +10,8 @@ import (
 )
 
 type AppConfig struct {
-	RedisConf  util.RedisConf
-	EtcdConf   util.EtcdConf
+	RedisConf  common.RedisConf
+	EtcdConf   common.EtcdConf
 	ProductKey string
 	LogPath    string
 	LogLevel   string
