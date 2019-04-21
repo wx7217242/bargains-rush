@@ -1,25 +1,24 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/astaxie/beego"
 	"github.com/astaxie/beego/logs"
 	"github.com/garyburd/redigo/redis"
+	"github.com/wx7217242/bargains-rush/proxy/config"
+	"github.com/wx7217242/bargains-rush/proxy/service"
 	"github.com/wx7217242/go-common"
 	etcd_client "go.etcd.io/etcd/clientv3"
+	"go.etcd.io/etcd/mvcc/mvccpb"
 	"strings"
 )
 
-type AppConfig struct {
-	redisConf  util.RedisConf
-	etcdConf   util.EtcdConf
-	productKey string
-	logPath    string
-	logLevel   string
-}
-
 var (
-	appConfig  AppConfig
+	appConfig = config.AppConfig{
+		BargainsRushConfMap: make(map[int]*config.BargainsRushConf, 1024),
+	}
 	redisPool  *redis.Pool
 	etcdClient *etcd_client.Client
 )
@@ -50,7 +49,7 @@ func initConf() error {
 	} else {
 		redisConf.IdleTimeout = redis_idle_timeout
 	}
-	appConfig.redisConf = redisConf
+	appConfig.RedisConf = redisConf
 
 	// 初始化etcd
 	key_prefix := beego.AppConfig.String("etcd_bargains_rush_key_prefix")
@@ -63,7 +62,7 @@ func initConf() error {
 	if strings.HasSuffix(key_prefix, "/") == false {
 		key_prefix = key_prefix + "/"
 	}
-	appConfig.productKey = fmt.Sprintf("%s%s", key_prefix, product_key)
+	appConfig.ProductKey = fmt.Sprintf("%s%s", key_prefix, product_key)
 
 	var etcdConf util.EtcdConf
 	etcdConf.Endpoints = []string{beego.AppConfig.String("etcd_addr")}
@@ -76,10 +75,10 @@ func initConf() error {
 	} else {
 		etcdConf.Timeout = etcd_timeout
 	}
-	appConfig.etcdConf = etcdConf
+	appConfig.EtcdConf = etcdConf
 
-	appConfig.logPath = beego.AppConfig.String("log_path")
-	appConfig.logLevel = beego.AppConfig.String("log_level")
+	appConfig.LogPath = beego.AppConfig.String("log_path")
+	appConfig.LogLevel = beego.AppConfig.String("log_level")
 
 	//logs.Debug("appConfig %v", appConfig)
 
@@ -88,24 +87,76 @@ func initConf() error {
 
 func initApp() (error) {
 
-	err := util.InitLogger(appConfig.logPath, appConfig.logLevel)
+	err := util.InitLogger(appConfig.LogPath, appConfig.LogLevel)
 	if err != nil {
 		return err
 	}
 
-	pool, err := util.InitRedis(appConfig.redisConf)
+	pool, err := util.InitRedis(appConfig.RedisConf)
 	if err != nil {
 		return err
 	}
 	redisPool = pool
 	logs.Debug("init redisPool succeed!")
 
-	client, err := util.InitEtcd(appConfig.etcdConf)
+	client, err := util.InitEtcd(appConfig.EtcdConf)
 	if err != nil {
 		return err
 	}
 	etcdClient = client
 	logs.Debug("init etcdClient succeed!")
 
+	err = appConfig.GetBargainsRushConfFromEtcd(etcdClient)
+	if err != nil {
+		return err
+	}
+
+	service.InitService(appConfig)
+
+	go watchBargainsRushProductKey()
+
+	logs.Info("initApp succeed")
+
 	return nil
+}
+
+func watchBargainsRushProductKey() {
+
+	client, err := util.InitEtcd(appConfig.EtcdConf)
+	if err != nil {
+		logs.Error("init etcd failed, err:%v", err)
+		return
+	}
+
+	logs.Debug("begin watch key:%s", appConfig.ProductKey)
+	for {
+		rch := client.Watch(context.Background(), appConfig.ProductKey)
+		var secProductInfo []config.BargainsRushConf
+		var getConfSucc = true
+
+		for wresp := range rch {
+			for _, ev := range wresp.Events {
+				if ev.Type == mvccpb.DELETE {
+					logs.Warn("key[%s] 's config deleted", appConfig.ProductKey)
+					continue
+				}
+
+				if ev.Type == mvccpb.PUT && string(ev.Kv.Key) == appConfig.ProductKey {
+					err = json.Unmarshal(ev.Kv.Value, &secProductInfo)
+					if err != nil {
+						logs.Error("key [%s], Unmarshal[%s], err:%v ", err)
+						getConfSucc = false
+						continue
+					}
+				}
+				logs.Debug("get config from etcd, %s %q : %q\n", ev.Type, ev.Kv.Key, ev.Kv.Value)
+			}
+
+			if getConfSucc {
+				logs.Debug("get config from etcd succ, %v", secProductInfo)
+				appConfig.UpdateBargainsRushConf(secProductInfo)
+			}
+		}
+
+	}
 }
